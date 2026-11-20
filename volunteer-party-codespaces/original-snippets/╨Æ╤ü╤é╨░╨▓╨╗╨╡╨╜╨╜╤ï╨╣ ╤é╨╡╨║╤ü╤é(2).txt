@@ -1,0 +1,350 @@
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { motion } from "motion/react";
+import { toast } from "sonner";
+import { BadgeCheck, CalendarCheck, Mail, Music, PartyPopper, Send, ShieldCheck } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { apiErrorMessage, apiPost } from "@/lib/api";
+import { parseYouTubeId, youTubeThumb } from "@/lib/youtube";
+import type { RegistrationCreated } from "@/lib/types";
+
+const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+const CENTERS = [
+  "City Volunteer Center",
+  "Youth Volunteer Center",
+  "University Volunteer Club",
+  "Corporate Volunteer Program",
+  "Independent Volunteer",
+  "Other",
+];
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^\+?[0-9\s\-()]{7,25}$/;
+
+interface FormState {
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+  centerChoice: string;
+  centerOther: string;
+  note: string;
+  song_url: string;
+  consent: boolean;
+}
+
+const EMPTY_FORM: FormState = {
+  first_name: "",
+  last_name: "",
+  phone: "",
+  email: "",
+  centerChoice: "",
+  centerOther: "",
+  note: "",
+  song_url: "",
+  consent: false,
+};
+
+export default function RegistrationSection() {
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [success, setSuccess] = useState<RegistrationCreated | null>(null);
+  const queryClient = useQueryClient();
+
+  const set = (patch: Partial<FormState>) => setForm((prev) => ({ ...prev, ...patch }));
+
+  const songId = parseYouTubeId(form.song_url);
+  const songInvalid = form.song_url.trim() !== "" && !songId;
+
+  const mutation = useMutation({
+    mutationFn: (payload: Record<string, unknown>) =>
+      apiPost<RegistrationCreated>("/registrations", payload),
+    onSuccess: (data) => {
+      setSuccess(data);
+      setForm(EMPTY_FORM);
+      setErrors({});
+      queryClient.invalidateQueries({ queryKey: ["public-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["public-playlist"] });
+    },
+    onError: (err) => toast.error(apiErrorMessage(err)),
+  });
+
+  function validate(): boolean {
+    const next: Record<string, string> = {};
+    if (form.first_name.trim().length < 2) next.first_name = "Please enter your first name.";
+    if (form.last_name.trim().length < 2) next.last_name = "Please enter your last name.";
+    if (!PHONE_RE.test(form.phone.trim())) next.phone = "Enter a valid phone number (7–15 digits).";
+    if (!EMAIL_RE.test(form.email.trim())) next.email = "Enter a valid email address.";
+    const center = form.centerChoice === "Other" ? form.centerOther.trim() : form.centerChoice;
+    if (center.length < 2) next.center = "Choose your volunteer center or representation.";
+    if (songInvalid) next.song_url = "Paste a valid YouTube link — youtube.com/watch?v=… or youtu.be/…";
+    if (!form.consent) next.consent = "Please accept the privacy notice to register.";
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  }
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!validate() || mutation.isPending) return;
+    mutation.mutate({
+      first_name: form.first_name.trim(),
+      last_name: form.last_name.trim(),
+      phone: form.phone.trim(),
+      email: form.email.trim(),
+      volunteer_center:
+        form.centerChoice === "Other" ? form.centerOther.trim() : form.centerChoice,
+      note: form.note.trim(),
+      song_url: songId ? form.song_url.trim() : "",
+      privacy_consent: form.consent,
+    });
+  }
+
+  const fieldError = (key: string) =>
+    errors[key] ? <p className="mt-1.5 text-xs font-medium text-red-400">{errors[key]}</p> : null;
+
+  return (
+    <section id="register" className="relative scroll-mt-20 py-20 sm:py-28" data-testid="registration-section">
+      <div className="animate-glow pointer-events-none absolute right-0 top-24 size-80 rounded-full bg-purple-600/20 blur-[110px] motion-reduce:hidden" />
+      <div className="mx-auto max-w-7xl px-4 sm:px-6">
+        <div className="grid items-start gap-12 lg:grid-cols-[0.9fr_1.1fr]">
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-80px" }}
+            transition={{ duration: 0.6, ease: EASE }}
+          >
+            <p className="font-mono text-xs font-semibold uppercase tracking-[0.2em] text-purple-300">
+              Join the night
+            </p>
+            <h2 className="mt-3 text-2xl font-bold tracking-tight text-white sm:text-3xl lg:text-4xl">
+              Register for Volunteer Party 2025
+            </h2>
+            <p className="mt-4 max-w-lg text-base leading-relaxed text-slate-200">
+              Registration takes less than a minute. Every confirmed volunteer receives a unique
+              registration ID for check-in — and can suggest exactly one song for the DJ.
+            </p>
+            <ul className="mt-8 space-y-4">
+              {[
+                { icon: CalendarCheck, text: "Instant confirmation with your registration ID." },
+                { icon: Mail, text: "A confirmation email lands in your inbox right away." },
+                { icon: Music, text: "Optionally suggest ONE song for the party playlist." },
+                { icon: ShieldCheck, text: "Your contact details stay private — organizers only." },
+              ].map((item) => (
+                <li key={item.text} className="flex items-start gap-3 text-sm text-slate-200">
+                  <span className="glass mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg">
+                    <item.icon className="size-4 text-purple-300" />
+                  </span>
+                  {item.text}
+                </li>
+              ))}
+            </ul>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-80px" }}
+            transition={{ duration: 0.6, delay: 0.1, ease: EASE }}
+            className="glass rounded-3xl p-6 shadow-[0_8px_32px_rgba(0,0,0,0.45)] sm:p-8"
+          >
+            <form onSubmit={submit} noValidate data-testid="event-registration-form" className="space-y-5">
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="first-name" className="text-sm text-slate-200">First name *</Label>
+                  <Input
+                    id="first-name"
+                    value={form.first_name}
+                    onChange={(e) => set({ first_name: e.target.value })}
+                    placeholder="Aysel"
+                    data-testid="registration-first-name-input"
+                    className="mt-1.5 h-10 border-purple-500/25 bg-[#1c143b] text-white placeholder:text-slate-500"
+                  />
+                  {fieldError("first_name")}
+                </div>
+                <div>
+                  <Label htmlFor="last-name" className="text-sm text-slate-200">Last name *</Label>
+                  <Input
+                    id="last-name"
+                    value={form.last_name}
+                    onChange={(e) => set({ last_name: e.target.value })}
+                    placeholder="Mammadova"
+                    data-testid="registration-last-name-input"
+                    className="mt-1.5 h-10 border-purple-500/25 bg-[#1c143b] text-white placeholder:text-slate-500"
+                  />
+                  {fieldError("last_name")}
+                </div>
+                <div>
+                  <Label htmlFor="phone" className="text-sm text-slate-200">Phone number *</Label>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    value={form.phone}
+                    onChange={(e) => set({ phone: e.target.value })}
+                    placeholder="+994 50 123 45 67"
+                    data-testid="registration-phone-input"
+                    className="mt-1.5 h-10 border-purple-500/25 bg-[#1c143b] text-white placeholder:text-slate-500"
+                  />
+                  {fieldError("phone")}
+                </div>
+                <div>
+                  <Label htmlFor="email" className="text-sm text-slate-200">Email address *</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => set({ email: e.target.value })}
+                    placeholder="you@example.com"
+                    data-testid="registration-email-input"
+                    className="mt-1.5 h-10 border-purple-500/25 bg-[#1c143b] text-white placeholder:text-slate-500"
+                  />
+                  {fieldError("email")}
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-sm text-slate-200">Volunteer center / representation *</Label>
+                <Select value={form.centerChoice} onValueChange={(value) => set({ centerChoice: value })}>
+                  <SelectTrigger
+                    className="mt-1.5 h-10 w-full border-purple-500/25 bg-[#1c143b] text-white"
+                    data-testid="registration-volunteer-center-select"
+                  >
+                    <SelectValue placeholder="Choose your center" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CENTERS.map((center) => (
+                      <SelectItem key={center} value={center}>
+                        {center}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {form.centerChoice === "Other" && (
+                  <Input
+                    value={form.centerOther}
+                    onChange={(e) => set({ centerOther: e.target.value })}
+                    placeholder="Type your center or representation"
+                    data-testid="registration-volunteer-center-other-input"
+                    className="mt-2 h-10 border-purple-500/25 bg-[#1c143b] text-white placeholder:text-slate-500"
+                  />
+                )}
+                {fieldError("center")}
+              </div>
+
+              <div>
+                <Label htmlFor="note" className="text-sm text-slate-200">Additional note (optional)</Label>
+                <Textarea
+                  id="note"
+                  value={form.note}
+                  onChange={(e) => set({ note: e.target.value })}
+                  placeholder="Allergies, plus-ones, accessibility needs…"
+                  data-testid="registration-note-input"
+                  className="mt-1.5 min-h-20 border-purple-500/25 bg-[#1c143b] text-white placeholder:text-slate-500"
+                />
+              </div>
+
+              {/* MY PARTY SONG — one optional YouTube request per participant */}
+              <div className="rounded-2xl border border-purple-500/25 bg-purple-950/30 p-4">
+                <p className="flex items-center gap-2 font-heading text-base font-bold text-white">
+                  <Music className="size-4 text-purple-300" />
+                  Choose Your Party Song
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Which song would you like to hear at the party? One YouTube link per participant —
+                  the organizers pick the final setlist. Nothing plays on this page.
+                </p>
+                <Input
+                  value={form.song_url}
+                  onChange={(e) => set({ song_url: e.target.value })}
+                  placeholder="https://www.youtube.com/watch?v=… or https://youtu.be/…"
+                  data-testid="registration-youtube-song-input"
+                  aria-invalid={songInvalid}
+                  className="mt-3 h-10 border-purple-500/25 bg-[#1c143b] text-white placeholder:text-slate-500"
+                />
+                {songInvalid && (
+                  <p className="mt-1.5 text-xs font-medium text-red-400" data-testid="song-url-error">
+                    That does not look like a YouTube link — try youtube.com/watch?v=… or youtu.be/…
+                  </p>
+                )}
+                {songId && (
+                  <div className="mt-3 flex items-center gap-3" data-testid="song-preview">
+                    <img
+                      src={youTubeThumb(songId)}
+                      alt="Your party song preview"
+                      className="h-14 w-24 rounded-lg border border-purple-500/30 object-cover"
+                    />
+                    <p className="inline-flex items-center gap-1.5 text-xs font-semibold text-green-400">
+                      <BadgeCheck className="size-4" /> Great pick — we got your song!
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="flex items-start gap-3 text-sm text-slate-300">
+                  <Checkbox
+                    checked={form.consent}
+                    onCheckedChange={(checked) => set({ consent: checked === true })}
+                    data-testid="registration-privacy-checkbox"
+                    className="mt-0.5"
+                  />
+                  <span>
+                    I agree that my registration data may be used to organize the event and for
+                    check-in. It will not be shown publicly. *
+                  </span>
+                </label>
+                {fieldError("consent")}
+              </div>
+
+              <Button
+                type="submit"
+                size="lg"
+                disabled={mutation.isPending}
+                data-testid="registration-submit-button"
+                className="glow-ring w-full font-bold tracking-wide"
+              >
+                <Send className="size-4" />
+                {mutation.isPending ? "Sending…" : "SEND MY REGISTRATION"}
+              </Button>
+            </form>
+          </motion.div>
+        </div>
+      </div>
+
+      {/* Celebratory success confirmation */}
+      <Dialog open={success !== null} onOpenChange={(open) => !open && setSuccess(null)}>
+        <DialogContent
+          className="glass-strong max-w-md rounded-3xl text-center"
+          data-testid="registration-success-modal"
+        >
+          <span className="glow-ring mx-auto grid size-16 place-items-center rounded-full bg-gradient-to-br from-purple-500 to-fuchsia-600">
+            <PartyPopper className="size-8 text-white" />
+          </span>
+          <DialogTitle className="font-heading text-xl font-bold text-white">You are going to the party!</DialogTitle>
+          <DialogDescription className="text-sm leading-relaxed text-slate-300">
+            {success?.message}
+          </DialogDescription>
+          <div className="rounded-xl border border-purple-500/25 bg-[#1c143b] px-4 py-3">
+            <p className="font-mono text-xs uppercase tracking-[0.2em] text-purple-300">Your registration ID</p>
+            <p className="mt-1 break-all font-mono text-sm font-bold text-white" data-testid="registration-success-id">
+              {success?.id}
+            </p>
+          </div>
+          <Button
+            onClick={() => setSuccess(null)}
+            data-testid="registration-success-close-btn"
+            className="font-bold tracking-wide"
+          >
+            See you there!
+          </Button>
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+}

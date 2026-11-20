@@ -1,0 +1,255 @@
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { motion } from "motion/react";
+import { CalendarDays, MapPin, Music, Sparkles, Users } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
+import { apiGet } from "@/lib/api";
+import type { EventBundle, PublicPlaylistEntry, PublicSummary } from "@/lib/types";
+import { youTubeThumb } from "@/lib/youtube";
+
+// Curated placeholder — the hero photo until the team uploads theirs via the admin gallery.
+const HERO_IMAGE =
+  "https://images.unsplash.com/photo-1603910234616-3b5f4a6be2b4?crop=entropy&cs=srgb&fm=jpg&q=85";
+
+const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+function Countdown({ date, time, serverNow }: { date: string; time: string; serverNow?: string }) {
+  const [nowMs, setNowMs] = useState(() => (serverNow ? Date.parse(serverNow) : Date.now()));
+
+  // Anchor "now" to the server clock, then tick locally (drift-free, no client date math).
+  useEffect(() => {
+    if (serverNow) setNowMs(Date.parse(serverNow));
+  }, [serverNow]);
+
+  useEffect(() => {
+    const id = setInterval(() => setNowMs((m) => m + 1000), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (!date) return null;
+  const target = Date.parse(`${date}T${time || "19:00"}:00`);
+  if (Number.isNaN(target)) return null;
+  const diff = target - nowMs;
+  if (diff <= 0) {
+    return (
+      <div data-testid="hero-countdown-timer" className="glass rounded-xl px-6 py-4 font-heading text-xl font-bold text-purple-200">
+        It is party time!
+      </div>
+    );
+  }
+  const cells = [
+    { label: "Days", value: Math.floor(diff / 86_400_000) },
+    { label: "Hours", value: Math.floor((diff % 86_400_000) / 3_600_000) },
+    { label: "Minutes", value: Math.floor((diff % 3_600_000) / 60_000) },
+    { label: "Seconds", value: Math.floor((diff % 60_000) / 1000) },
+  ];
+  return (
+    <div data-testid="hero-countdown-timer" className="flex gap-2 sm:gap-3">
+      {cells.map((cell) => (
+        <div key={cell.label} className="glass w-16 rounded-xl px-2 py-2 text-center sm:w-20 sm:py-3">
+          <div className="font-mono text-2xl font-bold text-white sm:text-3xl">
+            {String(cell.value).padStart(2, "0")}
+          </div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-purple-300">{cell.label}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function HeroSection() {
+  const summaryQuery = useQuery({
+    queryKey: ["public-summary"],
+    queryFn: () => apiGet<PublicSummary>("/registrations/public/summary"),
+    retry: false,
+  });
+  const eventQuery = useQuery({
+    queryKey: ["event"],
+    queryFn: () => apiGet<EventBundle>("/event"),
+    retry: false,
+  });
+  const playlistQuery = useQuery({
+    queryKey: ["public-playlist"],
+    queryFn: () => apiGet<PublicPlaylistEntry[]>("/registrations/public/playlist"),
+    retry: false,
+  });
+
+  const settings = eventQuery.data?.settings;
+  const summary = summaryQuery.data;
+  const dateLabel = settings?.event_date
+    ? new Date(`${settings.event_date}T00:00:00`).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "Date to be announced";
+  const teaser = (playlistQuery.data ?? []).slice(0, 4);
+
+  return (
+    <section id="hero" className="relative flex min-h-svh items-center overflow-hidden">
+      <img
+        src={HERO_IMAGE}
+        alt="A crowd celebrating at a party under purple stage lights"
+        data-testid="hero-background-image"
+        className="absolute inset-0 h-full w-full object-cover"
+      />
+      {/* Scrim per design guidelines — keeps typography readable over the photo. */}
+      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(9,6,16,0.65)_0%,rgba(19,14,38,0.75)_50%,rgba(9,6,16,0.95)_100%)]" />
+      {/* Subtle animated gradient elements */}
+      <div className="animate-drift pointer-events-none absolute -left-24 top-1/4 size-96 rounded-full bg-purple-600/30 blur-[120px] motion-reduce:hidden" />
+      <div
+        className="animate-drift pointer-events-none absolute -right-24 top-10 size-80 rounded-full bg-fuchsia-600/25 blur-[110px] motion-reduce:hidden"
+        style={{ animationDelay: "-8s" }}
+      />
+      <div className="animate-glow pointer-events-none absolute bottom-0 left-1/3 size-72 rounded-full bg-sky-500/15 blur-[100px] motion-reduce:hidden" />
+
+      <div className="relative z-10 mx-auto w-full max-w-7xl px-4 pb-16 pt-28 sm:px-6 lg:pt-32">
+        <div className="grid items-center gap-10 lg:grid-cols-[1.15fr_0.85fr]">
+          <div>
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, ease: EASE }}
+            >
+              <span className="glass inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-purple-200">
+                <Sparkles className="size-3.5 text-purple-300" />
+                Volunteer celebration night
+              </span>
+            </motion.div>
+            <motion.h1
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.1, ease: EASE }}
+              data-testid="hero-title"
+              className="text-gradient animate-shimmer mt-6 text-4xl font-black leading-none tracking-tight sm:text-5xl lg:text-6xl"
+            >
+              VOLUNTEER PARTY 2025
+            </motion.h1>
+            <motion.p
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.2, ease: EASE }}
+              data-testid="hero-subtitle"
+              className="mt-4 text-lg font-semibold text-purple-200 sm:text-xl"
+            >
+              One Community. One Energy. One Unforgettable Night.
+            </motion.p>
+            <motion.p
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.3, ease: EASE }}
+              className="mt-4 max-w-xl text-base leading-relaxed text-slate-200"
+            >
+              A night to celebrate the people who showed up all year long — awards, dinner, a DJ set
+              built from YOUR song requests, and the whole volunteer family in one room.
+            </motion.p>
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.4, ease: EASE }}
+              className="mt-8 flex flex-wrap items-center gap-3"
+            >
+              <a
+                href="#register"
+                data-testid="hero-register-now-button"
+                className={buttonVariants({ size: "lg" }) + " glow-ring font-bold tracking-wide"}
+              >
+                REGISTER NOW
+              </a>
+              <a
+                href="#about"
+                data-testid="hero-discover-party-button"
+                className={
+                  buttonVariants({ variant: "outline", size: "lg" }) +
+                  " glass border-purple-400/40 font-bold tracking-wide text-white"
+                }
+              >
+                DISCOVER THE PARTY
+              </a>
+            </motion.div>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.6, delay: 0.55 }}
+              className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-300"
+            >
+              <span className="inline-flex items-center gap-2">
+                <CalendarDays className="size-4 text-purple-300" /> {dateLabel}
+              </span>
+              {settings?.event_location && (
+                <span className="inline-flex items-center gap-2">
+                  <MapPin className="size-4 text-purple-300" /> {settings.event_location}
+                </span>
+              )}
+            </motion.div>
+          </div>
+
+          <motion.aside
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.35, ease: EASE }}
+            className="glass hidden rounded-3xl p-6 shadow-[0_8px_32px_rgba(0,0,0,0.45)] lg:block"
+            data-testid="hero-side-card"
+          >
+            <p className="font-mono text-xs font-semibold uppercase tracking-[0.2em] text-purple-300">
+              Countdown to party night
+            </p>
+            <div className="mt-4">
+              <Countdown
+                date={settings?.event_date ?? ""}
+                time={settings?.event_time ?? ""}
+                serverNow={summary?.server_now}
+              />
+            </div>
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <div className="rounded-2xl bg-white/5 p-4" data-testid="hero-stat-registrations">
+                <div className="flex items-center gap-2 text-purple-300">
+                  <Users className="size-4" />
+                  <span className="text-xs font-semibold uppercase tracking-widest">Registered</span>
+                </div>
+                <div className="mt-2 font-mono text-3xl font-bold text-white">
+                  {summary ? summary.total_registrations : "—"}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-white/5 p-4" data-testid="hero-stat-songs">
+                <div className="flex items-center gap-2 text-purple-300">
+                  <Music className="size-4" />
+                  <span className="text-xs font-semibold uppercase tracking-widest">Songs queued</span>
+                </div>
+                <div className="mt-2 font-mono text-3xl font-bold text-white">
+                  {summary ? summary.total_songs : "—"}
+                </div>
+              </div>
+            </div>
+            {teaser.length > 0 && (
+              <div className="mt-6">
+                <p className="font-mono text-xs font-semibold uppercase tracking-[0.2em] text-purple-300">
+                  Fresh on the setlist
+                </p>
+                <div className="mt-3 flex items-center gap-3">
+                  {teaser.map((entry, i) => (
+                    <a
+                      key={`${entry.song_video_id}-${i}`}
+                      href="#playlist"
+                      data-testid="hero-playlist-teaser-thumb"
+                      className="group relative overflow-hidden rounded-xl border border-purple-500/20"
+                    >
+                      <img
+                        src={youTubeThumb(entry.song_video_id)}
+                        alt="Party song suggestion thumbnail"
+                        className="h-14 w-24 object-cover transition-transform duration-300 group-hover:scale-110"
+                      />
+                    </a>
+                  ))}
+                  <a href="#playlist" className="text-sm font-semibold text-purple-300 hover:text-purple-200">
+                    Hear them all →
+                  </a>
+                </div>
+              </div>
+            )}
+          </motion.aside>
+        </div>
+      </div>
+    </section>
+  );
+}

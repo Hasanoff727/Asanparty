@@ -1,0 +1,298 @@
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Check, Download, Eye, Search, Trash2, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { apiDelete, apiErrorMessage, apiGet, apiPatch } from "@/lib/api";
+import type { Registration, RegistrationStats, RegistrationStatus } from "@/lib/types";
+import { STATUS_STYLES, formatDate } from "@/components/admin/OverviewPanel";
+import { youTubeThumb, youTubeUrl } from "@/lib/youtube";
+
+export default function RegistrationsPanel() {
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<"all" | RegistrationStatus>("all");
+  const [center, setCenter] = useState("all");
+  const [detail, setDetail] = useState<Registration | null>(null);
+  const queryClient = useQueryClient();
+
+  const statsQuery = useQuery({
+    queryKey: ["admin-stats"],
+    queryFn: () => apiGet<RegistrationStats>("/registrations/stats"),
+  });
+
+  const listQuery = useQuery({
+    queryKey: ["admin-registrations", search, status, center],
+    queryFn: () => {
+      const qs = new URLSearchParams();
+      if (search.trim()) qs.set("search", search.trim());
+      if (status !== "all") qs.set("status", status);
+      if (center !== "all") qs.set("center", center);
+      const suffix = qs.toString();
+      return apiGet<Registration[]>(`/registrations${suffix ? `?${suffix}` : ""}`);
+    },
+  });
+
+  const rows = listQuery.data ?? [];
+  const centers = useMemo(() => (statsQuery.data?.top_centers ?? []).map((c) => c.center), [statsQuery.data]);
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["admin-registrations"] });
+    queryClient.invalidateQueries({ queryKey: ["admin-stats"] });
+  };
+
+  const updateStatus = useMutation({
+    mutationFn: ({ id, next }: { id: string; next: RegistrationStatus }) =>
+      apiPatch<Registration>(`/registrations/${id}`, { status: next }),
+    onSuccess: (reg) => {
+      invalidate();
+      toast.success(`${reg.first_name}'s registration is now ${reg.status}.`);
+    },
+    onError: (err) => toast.error(apiErrorMessage(err)),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => apiDelete(`/registrations/${id}`),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Registration deleted.");
+    },
+    onError: (err) => toast.error(apiErrorMessage(err)),
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-56 flex-1">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, phone or email…"
+            data-testid="admin-registrations-search-input"
+            className="h-10 border-purple-500/25 bg-[#1c143b] pl-9 text-white placeholder:text-slate-500"
+          />
+        </div>
+        <Select value={status} onValueChange={(value) => setStatus(value as "all" | RegistrationStatus)}>
+          <SelectTrigger className="h-10 w-40 border-purple-500/25 bg-[#1c143b] text-white" data-testid="admin-registrations-status-filter">
+            <SelectValue>{(v: string) => (v === "all" ? "All statuses" : v)}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="approved">Approved</SelectItem>
+            <SelectItem value="rejected">Rejected</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={center} onValueChange={setCenter}>
+          <SelectTrigger className="h-10 w-56 border-purple-500/25 bg-[#1c143b] text-white" data-testid="admin-registrations-center-filter">
+            <SelectValue>{(v: string) => (v === "all" ? "All centers" : v)}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All centers</SelectItem>
+            {centers.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <a
+          href="/api/registrations/export/csv"
+          data-testid="admin-export-registrations-csv-btn"
+          className="inline-flex h-10 items-center gap-2 rounded-lg border border-purple-400/40 px-4 text-sm font-bold tracking-wide text-purple-200 transition-colors hover:bg-purple-600/20 hover:text-white"
+        >
+          <Download className="size-4" /> Export CSV
+        </a>
+      </div>
+
+      <div className="glass overflow-hidden rounded-2xl" data-testid="admin-registrations-table">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-white/5 hover:bg-transparent">
+              <TableHead>Volunteer</TableHead>
+              <TableHead>Contact</TableHead>
+              <TableHead>Center</TableHead>
+              <TableHead>Song</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Registered</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {listQuery.isPending ? (
+              [0, 1, 2, 3].map((i) => (
+                <TableRow key={i} className="border-white/5">
+                  <TableCell colSpan={7}>
+                    <div className="h-8 animate-pulse rounded bg-white/5" />
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : rows.length === 0 ? (
+              <TableRow className="border-white/5">
+                <TableCell colSpan={7} className="py-10 text-center text-sm text-slate-400" data-testid="admin-registrations-empty">
+                  No registrations match these filters.
+                </TableCell>
+              </TableRow>
+            ) : (
+              rows.map((reg) => (
+                <TableRow key={reg.id} className="border-white/5" data-testid={`admin-registration-row-${reg.id}`}>
+                  <TableCell>
+                    <p className="text-sm font-semibold text-white">
+                      {reg.first_name} {reg.last_name}
+                    </p>
+                    {reg.note && <p className="max-w-52 truncate text-xs text-slate-500">{reg.note}</p>}
+                  </TableCell>
+                  <TableCell>
+                    <p className="text-sm text-slate-200">{reg.email}</p>
+                    <p className="font-mono text-xs text-slate-400">{reg.phone}</p>
+                  </TableCell>
+                  <TableCell className="max-w-44 truncate text-sm text-slate-300">{reg.volunteer_center}</TableCell>
+                  <TableCell>
+                    {reg.song_video_id ? (
+                      <a href={youTubeUrl(reg.song_video_id)} target="_blank" rel="noopener noreferrer" data-testid={`admin-registration-song-link-${reg.id}`}>
+                        <img
+                          src={youTubeThumb(reg.song_video_id)}
+                          alt="Requested song thumbnail"
+                          className="h-9 w-16 rounded border border-purple-500/25 object-cover transition-transform hover:scale-105"
+                        />
+                      </a>
+                    ) : (
+                      <span className="text-xs text-slate-500">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <span
+                      className={`rounded-full border px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider ${STATUS_STYLES[reg.status]}`}
+                      data-testid={`admin-registration-status-${reg.id}`}
+                    >
+                      {reg.status}
+                    </span>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap font-mono text-xs text-slate-400">
+                    {formatDate(reg.created_at)}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        onClick={() => setDetail(reg)}
+                        aria-label="View details"
+                        data-testid={`admin-registration-detail-btn-${reg.id}`}
+                      >
+                        <Eye className="size-4" />
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        disabled={reg.status === "approved" || updateStatus.isPending}
+                        onClick={() => updateStatus.mutate({ id: reg.id, next: "approved" })}
+                        aria-label="Approve"
+                        data-testid={`admin-registration-approve-btn-${reg.id}`}
+                        className="text-emerald-300 hover:bg-emerald-500/15 hover:text-emerald-200"
+                      >
+                        <Check className="size-4" />
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        disabled={reg.status === "rejected" || updateStatus.isPending}
+                        onClick={() => updateStatus.mutate({ id: reg.id, next: "rejected" })}
+                        aria-label="Reject"
+                        data-testid={`admin-registration-reject-btn-${reg.id}`}
+                        className="text-red-300 hover:bg-red-500/15 hover:text-red-200"
+                      >
+                        <X className="size-4" />
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        disabled={remove.isPending}
+                        onClick={() => {
+                          if (window.confirm(`Delete the registration of ${reg.first_name} ${reg.last_name}?`))
+                            remove.mutate(reg.id);
+                        }}
+                        aria-label="Delete"
+                        data-testid={`admin-registration-delete-btn-${reg.id}`}
+                        className="text-slate-400 hover:bg-red-500/15 hover:text-red-200"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      <Dialog open={detail !== null} onOpenChange={(open) => !open && setDetail(null)}>
+        <DialogContent className="glass-strong max-w-lg rounded-2xl" data-testid="admin-registration-detail-modal">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-lg font-bold text-white" data-testid="admin-registration-detail-name">
+              {detail ? `${detail.first_name} ${detail.last_name}` : ""}
+            </DialogTitle>
+            <DialogDescription data-testid="admin-registration-detail-id">
+              Registration ID: <span className="font-mono text-purple-300">{detail?.id}</span>
+            </DialogDescription>
+          </DialogHeader>
+          {detail && (
+            <div className="space-y-3 text-sm" data-testid="admin-registration-detail-body">
+              {[
+                ["Email", detail.email],
+                ["Phone", detail.phone],
+                ["Volunteer center", detail.volunteer_center],
+                ["Note", detail.note || "—"],
+                ["Registered", formatDate(detail.created_at)],
+              ].map(([label, value]) => (
+                <div key={label} className="flex gap-3">
+                  <span className="w-36 shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</span>
+                  <span className="break-words text-slate-200">{value}</span>
+                </div>
+              ))}
+              <div className="flex gap-3">
+                <span className="w-36 shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">Status</span>
+                <Badge variant="outline" className={STATUS_STYLES[detail.status]}>
+                  {detail.status}
+                </Badge>
+              </div>
+              {detail.song_video_id && (
+                <div className="flex items-center gap-3 rounded-xl border border-purple-500/25 bg-[#1c143b] p-3">
+                  <img
+                    src={youTubeThumb(detail.song_video_id)}
+                    alt="Requested party song thumbnail"
+                    className="h-12 w-20 rounded object-cover"
+                  />
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Party song request</p>
+                    <a
+                      href={youTubeUrl(detail.song_video_id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm font-medium text-purple-300 underline-offset-2 hover:underline"
+                      data-testid="admin-registration-detail-song-link"
+                    >
+                      Open on YouTube
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
